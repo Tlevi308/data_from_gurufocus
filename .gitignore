@@ -1,0 +1,31 @@
+# סודות — לעולם לא ל-Git
+.env
+*.key
+
+# פלטים ומטמון
+output/
+data/raw/
+*.xlsx
+*.csv
+*.parquet
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# תלויות Node שהוזרקו דרך symlink — חובה לסנן
+node_modules/
+
+# QA: סקריפטי הבדיקה (.mjs) נשמרים, צילומי מסך ופלטי הרצה לא
+.spreadsheet_qa/*.png
+.spreadsheet_qa/*.json
+.spreadsheet_order_qa/*.png
+.spreadsheet_order_qa/*.json
+.docx_qa_roic/
+.docx_qa_raw_roic/
+outputs/

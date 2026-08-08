@@ -14,6 +14,7 @@
 Endpoints בשימוש (אומתו מול ה-API החי):
     GET /stocks/{symbol}/fundamentals -> dict עם annually / quarterly / ttm /
                                           basic_information / stockid
+    GET /stocks/{symbol}/profile      -> פרופיל החברה, לרבות sector ו-industry
     GET /stocks/{symbol}/valuations   -> היסטוריית שווי שוק ויחסי שווי וחוב
 """
 
@@ -33,6 +34,7 @@ BASE_URL = "https://api.gurufocus.com/data"
 
 # הנתיבים היחידים שהפרוייקט משתמש בהם. אם GuruFocus משנים נתיב — כאן מעדכנים.
 PATH_FUNDAMENTALS = "/stocks/{symbol}/fundamentals"
+PATH_PROFILE = "/stocks/{symbol}/profile"
 PATH_VALUATIONS = "/stocks/{symbol}/valuations"
 
 # קודי HTTP שראוי לנסות שוב עליהם
@@ -187,6 +189,25 @@ class GuruFocusClient:
         if not isinstance(payload, dict):
             raise GuruFocusError(
                 f"fundamentals עבור {symbol} החזיר {type(payload).__name__} ולא dict"
+            )
+        return payload
+
+    def profile(self, symbol: str, *, use_cache: bool = True) -> dict:
+        """פרופיל החברה, לרבות סקטור ותעשייה.
+
+        במבנה הנוכחי של GuruFocus שדות הסיווג נמצאים תחת ``general``.
+        התשובה נשמרת במטמון נפרד בשם ``{symbol}__profile.json``.
+        """
+        payload = self._fetch(
+            symbol,
+            "profile",
+            PATH_PROFILE,
+            use_cache=use_cache,
+        )
+        if not isinstance(payload, dict):
+            raise GuruFocusError(
+                f"profile עבור {symbol} החזיר "
+                f"{type(payload).__name__} ולא dict"
             )
         return payload
 

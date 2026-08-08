@@ -175,6 +175,19 @@ FIELDS_SUPPORT: list[Field] = [
         note="GuruFocus records tax expense with a negative sign.",
     ),
     _F(
+        "interest_expense",
+        "Interest Expense",
+        "interest_expense",
+        SECTION_INCOME,
+        (),
+        flow=True,
+        note=(
+            "GuruFocus records interest expense with a negative sign. Reported "
+            "as zero in many quarters even when interest-bearing debt exists, "
+            "so the cost of debt carries a quality flag."
+        ),
+    ),
+    _F(
         "free_cash_flow",
         "Free Cash Flow",
         "total_free_cash_flow",

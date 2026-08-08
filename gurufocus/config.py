@@ -15,9 +15,12 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field, fields as dataclass_fields, replace
 from pathlib import Path
 from typing import Any
+
+from .decomposition import DEFAULT_TOLERANCE, DecompositionTolerance
+from .wacc import DEFAULT_ASSUMPTIONS, WaccAssumptions
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -63,6 +66,14 @@ class Settings:
     network: NetworkSettings = field(default_factory=NetworkSettings)
     cache: CacheSettings = field(default_factory=CacheSettings)
     output: OutputSettings = field(default_factory=OutputSettings)
+    # ספי המהותיות של פירוק ROIC/NOPAT. ברירת המחדל מוגדרת במודול
+    # decomposition כדי שהמשמעות הכלכלית של כל סף תתועד לצד החישוב.
+    decomposition: DecompositionTolerance = field(
+        default_factory=lambda: DEFAULT_TOLERANCE
+    )
+    # הריבית חסרת הסיכון ופרמיית הסיכון. משתנות עם השוק ולכן יושבות בראש
+    # config.yaml, בחלק שמשנים ביום-יום.
+    wacc: WaccAssumptions = field(default_factory=lambda: DEFAULT_ASSUMPTIONS)
 
     # -- נגזרות --------------------------------------------------------------
     @property
@@ -93,6 +104,8 @@ class Settings:
             raise ValueError(
                 f"end_date ({self.end_date}) מוקדם מ-start_date ({self.start_date})"
             )
+        self.decomposition.validate()
+        self.wacc.validate()
 
 
 # ---------------------------------------------------------------------------
@@ -167,6 +180,30 @@ def _resolve_path(value: str | Path) -> Path:
     return p if p.is_absolute() else PROJECT_ROOT / p
 
 
+def _numeric_block(raw: dict[str, Any], block: str, default: Any) -> Any:
+    """בונה dataclass של פרמטרים מספריים מבלוק ב-config.yaml.
+
+    מפתח לא מוכר נחסם במפורש: פרמטר שנכתב בשגיאת כתיב היה מתעלם בשקט
+    ומשאיר את ברירת המחדל, כך שהתוצאות היו משתנות בלי שאיש ישים לב.
+    """
+    if not raw:
+        return default
+    known = {spec.name for spec in dataclass_fields(type(default))}
+    unknown = sorted(set(raw) - known)
+    if unknown:
+        raise ValueError(
+            f"מפתחות לא מוכרים בבלוק {block}: "
+            + ", ".join(unknown)
+            + " — המפתחות האפשריים: "
+            + ", ".join(sorted(known))
+        )
+    try:
+        values = {name: float(value) for name, value in raw.items()}
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"ערך לא מספרי בבלוק {block}: {exc}") from exc
+    return type(default)(**values)
+
+
 def load_settings(
     config_path: str | Path | None = None,
     *,
@@ -184,6 +221,8 @@ def load_settings(
     cache = raw.get("cache") or {}
     out = raw.get("output") or {}
     align = raw.get("alignment") or {}
+    decomposition = raw.get("decomposition") or {}
+    wacc = raw.get("wacc") or {}
 
     settings = Settings(
         api_key=resolve_api_key(allow_prompt=allow_prompt),
@@ -206,6 +245,10 @@ def load_settings(
             directory=_resolve_path(out.get("directory", "output")),
             formats=tuple(str(f).lower() for f in out.get("formats", ["excel", "csv"])),
         ),
+        decomposition=_numeric_block(
+            decomposition, "decomposition", DEFAULT_TOLERANCE
+        ),
+        wacc=_numeric_block(wacc, "wacc", DEFAULT_ASSUMPTIONS),
     )
 
     if overrides:

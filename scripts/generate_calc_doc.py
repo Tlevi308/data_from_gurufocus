@@ -354,7 +354,46 @@ DebtToEquity = DebtValue / TotalStockholdersEquity
 """,
     )
 
-    add_heading(doc, "7. עמודות החישוב בפלט")
+    add_heading(doc, "7. פירוק Shapley של השינוי הרבעוני")
+    add_code(
+        doc,
+        """
+E = EBIT,  T = RawTaxRate,  Q = 1 - T,  I = AverageIC_RAW_Quarterly
+
+NOPAT = E * Q          ROIC = E * Q / I
+
+C_EBIT^NOPAT = (E1 - E0) * (Q0 + Q1) / 2
+C_Tax^NOPAT  = (Q1 - Q0) * (E0 + E1) / 2
+
+C_EBIT^ROIC = (E1-E0) * [ (1/3)(Q0/I0) + (1/6)(Q1/I0)
+                        + (1/6)(Q0/I1) + (1/3)(Q1/I1) ]
+C_Tax^ROIC  = (Q1-Q0) * [ (1/3)(E0/I0) + (1/6)(E1/I0)
+                        + (1/6)(E0/I1) + (1/3)(E1/I1) ]
+C_IC^ROIC   = (1/I1 - 1/I0) * [ (1/3)(E0*Q0) + (1/6)(E1*Q0)
+                              + (1/6)(E0*Q1) + (1/3)(E1*Q1) ]
+""",
+    )
+    add_paragraph(
+        doc,
+        "ערך Shapley הוא ממוצע התרומה השולית של כל גורם על פני כל סדרי "
+        "השינוי האפשריים, ולכן הוא אינו תלוי בסדר וסכום התרומות שווה בדיוק "
+        "לשינוי הכולל. פירוק סדרתי היה מייחס את איברי האינטראקציה לגורם "
+        "שמשתנה אחרון.",
+    )
+    add_paragraph(
+        doc,
+        "המס נכנס כ-Q = 1 - T ולא כ-T, כדי ששני המדדים יישארו מכפלתיים גם "
+        "כאשר שיעור המס שלילי או גבוה מ-100%. I נקרא מעמודת הממוצע הקיימת "
+        "בשתי נקודות זמן ואינו ממוצע פעם נוספת.",
+    )
+    add_paragraph(
+        doc,
+        "סימן ההשפעה נקבע לפי תרומת Shapley ולא לפי כיוון התנועה הגולמי: "
+        "כאשר Q שלילי עלייה ב-EBIT מקטינה את NOPAT, וכאשר NOPAT שלילי ירידה "
+        "בהון המושקע הופכת את ROIC לשלילי יותר.",
+    )
+
+    add_heading(doc, "8. עמודות החישוב בפלט")
     add_table(
         doc,
         [
@@ -373,7 +412,148 @@ DebtToEquity = DebtValue / TotalStockholdersEquity
         ],
     )
 
+    add_heading(doc, "9. עמודות הפירוק")
+    add_table(doc, _decomposition_rows())
+    add_paragraph(
+        doc,
+        "בנוסף נוצרות 63 עמודות דמה (9 + 27 + 27) במכפלה קרטזית, כך שכל "
+        "שילוב אפשרי מקבל עמודה. בכל שורה מסווגת נדלקת בדיוק עמודה אחת מכל "
+        "משפחה, ובשורה שאינה מסווגת כל העמודות מקבלות 0.",
+    )
+
+    add_heading(doc, "10. עלות ההון (WACC)")
+    add_code(
+        doc,
+        """
+WACC = E/(D+E) * Re  +  D/(D+E) * Rd * (1 - T)
+
+E  = MarketCap                          שווי שוק, לא הון עצמי חשבונאי
+D  = DebtValue                          חוב קצר וארוך כולל חכירות
+Re = Rf + ERP                           ללא CAPM וללא בטא
+Rd = InterestExpense_TTM / AverageDebt
+     AverageDebt = (D(t-4) + D(t)) / 2
+T  = TaxExpense_TTM / PretaxIncome_TTM  אפס אם המכנה אינו חיובי
+
+ROIC_Annualized = (1 + ROIC_Quarterly) ^ 4     - 1
+WACC_Quarterly  = (1 + WACC_Annual)    ^ (1/4) - 1
+""",
+    )
+    add_paragraph(
+        doc,
+        "המטרה אינה הערכת שווי אלא אומדן אחיד לסינון. Rf ו-ERP נקבעים "
+        "בקובץ ההגדרות ונכתבים כעמודות בכל שורה, כך שכל תצפית מתעדת את "
+        "ההנחה שלפיה תומחרה.",
+    )
+    add_paragraph(
+        doc,
+        "המשקלים משתמשים ביתרת סוף התקופה, כמו שווי השוק. הממוצע קיים רק "
+        "במכנה של עלות החוב, משום שהמונה שם הוא זרימה של שנה שלמה.",
+    )
+    add_paragraph(
+        doc,
+        "שתי ההמרות מוחזרות ריקות כאשר הבסיס אינו חיובי: בחזקה זוגית "
+        "תשואה רבעונית של מינוס 200% הייתה יוצאת אפס, ובשורש רביעי מספר "
+        "שלילי אינו מוגדר. מכיוון שההיוון מונוטוני, פסק הדין של ROIC מול "
+        "WACC זהה בשתי היחידות.",
+    )
+    add_paragraph(
+        doc,
+        "ה-API מדווח הוצאות ריבית כאפס בחלק ניכר מהרבעונים גם כשקיים חוב. "
+        "הערך נלקח כפי שהוא, ועמודת calc_wacc_quality_flag מסמנת את השורה "
+        "כ-DEBT_WITHOUT_INTEREST כדי שניתן יהיה לסנן אותה.",
+    )
+    add_table(doc, _wacc_rows())
+
     return doc
+
+
+def _wacc_rows() -> list[tuple[str, str, str]]:
+    """שורות הטבלה של עמודות ה-WACC, לפי הסדר הקנוני שבמודול."""
+    from gurufocus.wacc import wacc_columns
+
+    meanings = {
+        "calc_roic_pretax_annualized_ic_raw": ("יחס", "ROIC לפני מס בהיוון שנתי, (1+r)^4-1"),
+        "calc_roic_posttax_annualized_ic_raw": ("יחס", "ROIC אחרי מס בהיוון שנתי, (1+r)^4-1"),
+        "calc_wacc_risk_free_rate": ("יחס", "Rf מקובץ ההגדרות"),
+        "calc_wacc_equity_risk_premium": ("יחס", "ERP מקובץ ההגדרות"),
+        "calc_wacc_cost_of_equity": ("יחס", "Re = Rf + ERP"),
+        "calc_wacc_equity_value": ("מספר", "E — שווי השוק"),
+        "calc_wacc_average_debt": ("מספר", "(D(t-4)+D(t))/2, למכנה של עלות החוב בלבד"),
+        "calc_wacc_total_capital": ("מספר", "E + D לסוף התקופה"),
+        "calc_wacc_equity_weight": ("יחס", "E/(D+E)"),
+        "calc_wacc_debt_weight": ("יחס", "D/(D+E)"),
+        "calc_interest_expense_ttm": ("מספר", "הוצאות ריבית בארבעה רבעונים, בסימן חיובי"),
+        "calc_wacc_cost_of_debt": ("יחס", "Rd — ריבית TTM חלקי חוב ממוצע"),
+        "calc_wacc_tax_rate": ("יחס", "שיעור מס TTM עם רצפה באפס"),
+        "calc_wacc_after_tax_cost_of_debt": ("יחס", "Rd * (1-T)"),
+        "calc_wacc_annual": ("יחס", "עלות ההון המשוקללת, שיעור שנתי"),
+        "calc_wacc_quarterly": ("יחס", "אותו שיעור בהמרה רבעונית גאומטרית"),
+        "calc_wacc_quality_flag": ("תווית", "עד כמה ניתן לסמוך על עלות החוב"),
+        "calc_wacc_inputs_complete": ("בוליאני", "האם כל הנתונים לחישוב היו זמינים"),
+        "calc_roic_minus_wacc_annualized": ("יחס", "הפער בין ROIC ל-WACC, שנתי"),
+        "calc_roic_minus_wacc_quarterly": ("יחס", "הפער בין ROIC ל-WACC, רבעוני"),
+        "calc_creates_value": ("בוליאני", "ROIC גבוה מ-WACC, כלומר החברה יוצרת ערך"),
+    }
+    missing = [name for name in wacc_columns() if name not in meanings]
+    if missing:
+        raise RuntimeError("חסר תיאור לעמודות WACC: " + ", ".join(missing))
+    return [(name, *meanings[name]) for name in wacc_columns()]
+
+
+def _decomposition_rows() -> list[tuple[str, str, str]]:
+    """שורות הטבלה של עמודות הפירוק, לפי הסדר הקנוני שבמודול."""
+    from gurufocus.decomposition import NAMED_DECOMPOSITION_COLUMNS
+
+    meanings = {
+        "calc_nopat_decomposition_status": ("תווית", "האם ניתן להשוות לרבעון הקודם, ואם לא — מדוע"),
+        "calc_nopat_change_quarterly": ("מספר", "NOPAT(t) פחות NOPAT(t-1)"),
+        "calc_nopat_change_direction": ("תווית", "INCREASE / DECREASE / STABLE / UNCLASSIFIED"),
+        "calc_nopat_ebit_contribution": ("מספר", "תרומת EBIT לשינוי ב-NOPAT"),
+        "calc_nopat_tax_contribution": ("מספר", "תרומת שיעור המס לשינוי ב-NOPAT"),
+        "calc_nopat_decomposition_residual": ("מספר", "שארית בדיקה, אפס עד כדי דיוק מספרי"),
+        "calc_nopat_ebit_effect": ("תווית", "סימן תרומת EBIT: POSITIVE / NEGATIVE / NEUTRAL"),
+        "calc_nopat_tax_effect": ("תווית", "סימן תרומת המס"),
+        "calc_nopat_effect_combination": ("תווית", "שילוב שני הסימנים, אחד מתשעה"),
+        "calc_roic_decomposition_status": ("תווית", "כמו למעלה, בתוספת UNCLASSIFIED_ZERO_IC"),
+        "calc_roic_posttax_change_quarterly": ("יחס", "ROIC(t) פחות ROIC(t-1)"),
+        "calc_roic_posttax_change_direction": ("תווית", "כיוון השינוי ב-ROIC"),
+        "calc_roic_ebit_contribution": ("יחס", "תרומת EBIT לשינוי ב-ROIC"),
+        "calc_roic_tax_contribution": ("יחס", "תרומת שיעור המס לשינוי ב-ROIC"),
+        "calc_roic_ic_contribution": ("יחס", "תרומת ההון המושקע לשינוי ב-ROIC"),
+        "calc_roic_decomposition_residual": ("יחס", "שארית בדיקה, אפס עד כדי דיוק מספרי"),
+        "calc_roic_ebit_effect": ("תווית", "סימן תרומת EBIT ל-ROIC"),
+        "calc_roic_tax_effect": ("תווית", "סימן תרומת המס ל-ROIC"),
+        "calc_roic_ic_effect": ("תווית", "סימן תרומת ההון המושקע ל-ROIC"),
+        "calc_roic_effect_combination": ("תווית", "שילוב שלושת הסימנים, אחד מ-27"),
+        "calc_ebit_movement": ("תווית", "כיוון גולמי של EBIT: UP / DOWN / FLAT"),
+        "calc_tax_rate_movement": ("תווית", "כיוון גולמי של שיעור המס"),
+        "calc_ic_movement": ("תווית", "כיוון גולמי של ההון המושקע"),
+        "calc_raw_movement_combination": ("תווית", "שילוב שלוש התנועות הגולמיות, אחד מ-27"),
+        "calc_roic_has_opposing_effects": ("בוליאני", "קיימת תרומה חיובית וגם תרומה שלילית"),
+        "calc_roic_positive_driver_count": ("מספר", "כמה תרומות חיוביות"),
+        "calc_roic_negative_driver_count": ("מספר", "כמה תרומות שליליות"),
+        "calc_roic_neutral_driver_count": ("מספר", "כמה תרומות בתוך סף המהותיות"),
+        "calc_roic_active_driver_count": ("מספר", "כמה תרומות אינן ניטרליות"),
+        "calc_roic_effect_structure": ("תווית", "מבנה התרומות: ALL_POSITIVE, MIXED_FULL_OFFSET וכו'"),
+        "calc_roic_total_absolute_contribution": ("יחס", "סכום הערכים המוחלטים של שלוש התרומות"),
+        "calc_roic_ebit_absolute_share": ("יחס", "משקל התרומה המוחלטת של EBIT"),
+        "calc_roic_tax_absolute_share": ("יחס", "משקל התרומה המוחלטת של המס"),
+        "calc_roic_ic_absolute_share": ("יחס", "משקל התרומה המוחלטת של ההון המושקע"),
+        "calc_roic_dominant_driver": ("תווית", "EBIT / TAX / IC / BALANCED / NONE"),
+        "calc_roic_dominant_driver_effect": ("תווית", "סימן התרומה של הגורם הדומיננטי"),
+        "calc_roic_offset_ratio": ("יחס", "1 פחות |ΔROIC| חלקי סכום התרומות המוחלטות"),
+        "calc_ebit_sign_regime": ("תווית", "מעבר רווח/הפסד/אפס של EBIT"),
+        "calc_nopat_sign_regime": ("תווית", "מעבר רווח/הפסד/אפס של NOPAT"),
+        "calc_tax_rate_quality_flag": ("תווית", "VALID / NEGATIVE_TAX_RATE / ABOVE_100_PERCENT / MISSING"),
+        "calc_roic_quality_flag": ("תווית", "מסמן הון מושקע שלילי או שיעור מס מחוץ לטווח"),
+        "calc_roic_economic_interpretation_valid": ("בוליאני", "האם ניתן לקרוא את היחס כיעילות כלכלית"),
+        "calc_roic_business_classification": ("תווית", "סיווג עסקי מסכם, ממצה לכל שילוב"),
+        "calc_roic_explanation": ("טקסט", "משפט קצר באנגלית הנגזר מהתרומות"),
+    }
+    missing = [name for name in NAMED_DECOMPOSITION_COLUMNS if name not in meanings]
+    if missing:
+        raise RuntimeError("חסר תיאור לעמודות פירוק: " + ", ".join(missing))
+    return [(name, *meanings[name]) for name in NAMED_DECOMPOSITION_COLUMNS]
 
 
 def main() -> int:

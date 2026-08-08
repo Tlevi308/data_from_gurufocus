@@ -5,8 +5,14 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from gurufocus.calculations import add_calculated, calc_columns
+from gurufocus.calculations import (
+    add_calculated,
+    calc_columns,
+    calculation_dependencies,
+)
+from gurufocus.decomposition import decomposition_columns
 from gurufocus.extract import build_frame
+from gurufocus.wacc import wacc_columns
 
 
 @pytest.fixture
@@ -16,10 +22,16 @@ def calculated(quarterly_payload):
     return add_calculated(frame)
 
 
-def test_only_fcf_uses_a_ttm_flow(calculated):
+def test_only_declared_flows_are_summed_over_twelve_months(calculated):
+    """TTM windows are the exception, not the default.
+
+    Every other flow column stays on a single quarter. These two are annual by
+    necessity: the EV/FCF multiple is a market convention, and the cost of debt
+    has to be an annual rate to sit alongside the cost of equity.
+    """
     assert [
         column for column in calculated.columns if column.endswith("_ttm")
-    ] == ["calc_free_cash_flow_ttm"]
+    ] == ["calc_free_cash_flow_ttm", "calc_interest_expense_ttm"]
 
 
 def test_tax_expense_and_nopat_use_only_current_quarter(calculated):
@@ -142,7 +154,7 @@ def test_zero_fcf_and_equity_return_blank_ratios(quarterly_payload):
 
 
 def test_only_requested_result_columns_are_exposed():
-    assert calc_columns() == [
+    base = [
         "calc_tax_expense_quarterly",
         "calc_raw_tax_rate_quarterly",
         "calc_nopat_quarterly",
@@ -156,3 +168,16 @@ def test_only_requested_result_columns_are_exposed():
         "calc_free_cash_flow_ttm",
         "calc_ev_to_fcf_quarterly",
     ]
+    columns = calc_columns()
+    # The original twelve keep their names and their position; later stages are
+    # appended after them in dependency order, never interleaved.
+    assert columns[: len(base)] == base
+    assert columns[len(base):] == decomposition_columns() + wacc_columns()
+
+
+def test_every_calculated_column_declares_its_sources(calculated):
+    dependencies = calculation_dependencies()
+    assert set(dependencies) == set(calc_columns())
+    # A column that is declared but never actually produced would make the
+    # contract silently wrong, so check the frame too.
+    assert set(calc_columns()) <= set(calculated.columns)

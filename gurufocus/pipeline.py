@@ -5,6 +5,7 @@
 בסדר הנכון ולאסוף דוחות. אם משהו כאן נראה מסובך — הוא שייך לשלב, לא לכאן.
 
     שלב 1  client      →  JSON גולמי
+    שלב 2א profile     →  סקטור ותעשייה
     שלב 3  parsing     →  רשומות שטוחות
     שלב 4  resolver    →  מיפוי שדות + דוח כיסוי
     שלב 5  extract     →  טבלה מסודרת + יישור תקופות
@@ -28,11 +29,13 @@ import pandas as pd
 
 from .calculations import add_calculated
 from .client import GuruFocusClient, GuruFocusError
+from .company_profile import attach_profile_classification
 from .config import Settings
 from .export import (
     build_output_path,
     calculation_audit_view,
     order_columns,
+    split_decomposition_dummies,
     write_csv,
     write_excel,
     write_parquet,
@@ -50,6 +53,7 @@ class TickerResult:
     symbol: str
     frame: pd.DataFrame | None = None
     report: ExtractReport | None = None
+    profile_report: dict = dc_field(default_factory=dict)
     valuations_report: dict = dc_field(default_factory=dict)
     error: str = ""
 
@@ -97,6 +101,20 @@ def process_ticker(
             quarter_shift_months=settings.quarter_shift_months,
         )
 
+        # ── שלב 2א: סיווג החברה מ-Profile ───────────────────────────────
+        profile_report: dict = {}
+        try:
+            profile_payload = client.profile(symbol, use_cache=use_cache)
+            frame, profile_report = attach_profile_classification(
+                frame,
+                profile_payload,
+            )
+        except GuruFocusError as exc:
+            # סיווג חסר אינו מבטל את הנתונים הפיננסיים של הטיקר.
+            log.warning("[%s] דילוג על profile: %s", symbol, exc)
+            frame, profile_report = attach_profile_classification(frame, {})
+            profile_report["error"] = str(exc)
+
         # ── שלב 6: נתוני valuations הרלוונטיים ───────────────────────────
         valuations_report: dict = {}
         if settings.is_quarterly:
@@ -122,7 +140,11 @@ def process_ticker(
 
         # ── שלב 7: חישובים רבעוניים ──────────────────────────────────────
         if settings.is_quarterly:
-            frame = add_calculated(frame)
+            frame = add_calculated(
+                frame,
+                tolerance=settings.decomposition,
+                wacc_assumptions=settings.wacc,
+            )
         else:
             log.info("[%s] period=%s — מדלג על חישובי ROIC/EV רבעוניים",
                      symbol, settings.period)
@@ -132,6 +154,7 @@ def process_ticker(
             symbol=symbol,
             frame=frame,
             report=report,
+            profile_report=profile_report,
             valuations_report=valuations_report,
         )
 
@@ -162,6 +185,21 @@ def build_manifest(results: list[TickerResult]) -> pd.DataFrame:
                 "duplicate_period_keys": ", ".join(result.report.duplicate_period_keys),
                 "api_keys_in_json": len(result.report.available_keys),
                 "company": result.report.metadata.get("company", ""),
+            })
+        if result.profile_report:
+            row.update({
+                "sector": result.profile_report.get("sector", "") or "",
+                "industry": result.profile_report.get("industry", "") or "",
+                "profile_fields_found": result.profile_report.get(
+                    "fields_found", 0
+                ),
+                "profile_fields_total": result.profile_report.get(
+                    "fields_total", 0
+                ),
+                "profile_fields_missing": ", ".join(
+                    result.profile_report.get("fields_missing", [])
+                ),
+                "profile_error": result.profile_report.get("error", ""),
             })
         if result.valuations_report:
             coverage = result.valuations_report.get("coverage")
@@ -267,13 +305,17 @@ def _write_outputs(
                         [coverage, valuation_coverage],
                         ignore_index=True,
                     ) if coverage is not None else valuation_coverage
+            # גיליון Data נשאר קריא לאדם: 63 עמודות הדמה של הפירוק עוברות
+            # לגיליון Decomposition. ב-CSV וב-parquet הן נשארות במקומן.
+            data_sheet, dummy_sheet = split_decomposition_dummies(audit_panel)
             path = write_excel(
                 build_output_path(settings.output.directory, settings.period, "xlsx"),
-                audit_panel,
+                data_sheet,
                 coverage=coverage,
                 nulls=null_report(panel),
                 checks=quality_checks(panel, settings.period),
                 manifest=manifest,
+                decomposition=dummy_sheet,
             )
         elif fmt == "csv":
             path = write_csv(

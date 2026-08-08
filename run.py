@@ -139,6 +139,16 @@ def print_summary(result, settings) -> None:
                 "תקופות עם EV/FCF לסוף הרבעון מול FCF TTM: "
                 f"{valid_ev_fcf}/{len(result.panel)}"
             )
+        if "calc_roic_decomposition_status" in result.panel.columns:
+            status = result.panel["calc_roic_decomposition_status"]
+            classified = int((status == "VALID").sum())
+            print(
+                "תקופות עם פירוק ROIC מלא: "
+                f"{classified}/{len(result.panel)}"
+            )
+            unclassified = status[status != "VALID"].value_counts()
+            for reason, count in unclassified.items():
+                print(f"    {reason}: {count}")
 
     if result.written:
         print("\n--- קבצים שנכתבו ---")

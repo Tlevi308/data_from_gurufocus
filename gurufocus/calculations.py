@@ -4,15 +4,41 @@ NOPAT and ROIC use the current quarter. Balance-sheet ROIC denominators use the
 average of consecutive opening and closing quarter-end balances. EV/FCF is a
 quarter-end valuation observation divided by trailing-four-quarter FCF, which
 matches the GuruFocus valuation-ratio convention.
+
+The quarter-over-quarter driver attribution for NOPAT and post-tax ROIC lives in
+:mod:`gurufocus.decomposition` and is appended by :func:`add_calculated`. It
+reads the columns computed here; it does not recompute or re-average any of
+them.
 """
 
 from __future__ import annotations
 
-import numpy as np
 import pandas as pd
 
+from .decomposition import (
+    DEFAULT_TOLERANCE,
+    DecompositionTolerance,
+    add_decomposition,
+    decomposition_columns,
+    decomposition_dependencies,
+)
+from .quarterly import (
+    consecutive_quarters as _consecutive_quarters,
+    divide as _divide,
+    numeric as _numeric,
+    quarter_average as _quarter_average,
+    trailing_four_quarter_sum as _trailing_four_quarter_sum,
+)
+from .wacc import (
+    DEFAULT_ASSUMPTIONS,
+    WaccAssumptions,
+    add_wacc,
+    wacc_columns,
+    wacc_dependencies,
+)
 
-_RESULT_COLUMNS = [
+
+_BASE_RESULT_COLUMNS = [
     "calc_tax_expense_quarterly",
     "calc_raw_tax_rate_quarterly",
     "calc_nopat_quarterly",
@@ -26,6 +52,8 @@ _RESULT_COLUMNS = [
     "calc_free_cash_flow_ttm",
     "calc_ev_to_fcf_quarterly",
 ]
+
+_RESULT_COLUMNS = _BASE_RESULT_COLUMNS + decomposition_columns() + wacc_columns()
 
 
 def calc_columns() -> list[str]:
@@ -82,6 +110,8 @@ def calculation_dependencies() -> dict[str, tuple[str, ...]]:
             "calc_enterprise_value_quarterly",
             "calc_free_cash_flow_ttm",
         ),
+        **decomposition_dependencies(),
+        **wacc_dependencies(),
     }
     missing = [column for column in calc_columns() if column not in dependencies]
     if missing:
@@ -91,50 +121,12 @@ def calculation_dependencies() -> dict[str, tuple[str, ...]]:
     return dependencies
 
 
-def _numeric(frame: pd.DataFrame, column: str) -> pd.Series:
-    """Return a numeric column, or an all-NaN series when it is absent."""
-    if column in frame.columns:
-        return pd.to_numeric(frame[column], errors="coerce")
-    return pd.Series(np.nan, index=frame.index, dtype=float)
-
-
-def _consecutive_quarters(frame: pd.DataFrame) -> pd.Series:
-    """Identify rows whose preceding row is the immediately prior quarter."""
-    quarter_num = (
-        frame["period_quarter"].astype(str).str.extract(r"(\d)")[0].astype(float)
-    )
-    quarter_index = frame["period_year"].astype(float) * 4 + (quarter_num - 1)
-    return ((quarter_index - quarter_index.shift(1)) == 1).fillna(False)
-
-
-def _divide(numerator: pd.Series, denominator: pd.Series) -> pd.Series:
-    """Divide while returning NaN for a missing or zero denominator."""
-    return numerator / denominator.where(denominator != 0)
-
-
-def _quarter_average(
-    ending_balance: pd.Series,
-    consecutive_quarters: pd.Series,
-) -> pd.Series:
-    """Average the opening and closing quarter-end balances."""
-    result = (ending_balance.shift(1) + ending_balance) / 2
-    return result.where(consecutive_quarters)
-
-
-def _trailing_four_quarter_sum(
-    flow: pd.Series,
-    consecutive_quarters: pd.Series,
-) -> pd.Series:
-    """Sum four quarters only when all four fiscal observations are consecutive."""
-    complete_window = (
-        consecutive_quarters
-        & consecutive_quarters.shift(1, fill_value=False)
-        & consecutive_quarters.shift(2, fill_value=False)
-    )
-    return flow.rolling(window=4, min_periods=4).sum().where(complete_window)
-
-
-def add_calculated(frame: pd.DataFrame) -> pd.DataFrame:
+def add_calculated(
+    frame: pd.DataFrame,
+    *,
+    tolerance: DecompositionTolerance = DEFAULT_TOLERANCE,
+    wacc_assumptions: WaccAssumptions = DEFAULT_ASSUMPTIONS,
+) -> pd.DataFrame:
     """Add the selected quarterly calculations to one ticker's sorted data."""
     d = frame.copy()
     n = lambda column: _numeric(d, column)  # noqa: E731
@@ -197,4 +189,21 @@ def add_calculated(frame: pd.DataFrame) -> pd.DataFrame:
         d["calc_free_cash_flow_ttm"],
     )
 
-    return d
+    # Reads the published NOPAT, IC average, and ROIC columns above and
+    # attributes their quarter-over-quarter change to EBIT, tax, and invested
+    # capital. The same consecutive-quarter mask is reused throughout so the
+    # stages can never disagree about which rows are comparable.
+    d = add_decomposition(
+        d,
+        consecutive_quarters=consecutive_quarters,
+        tolerance=tolerance,
+    )
+
+    # Runs last: it needs the debt, ROIC and tax-expense columns above, and it
+    # annualises the ROIC columns so the ROIC > WACC screen compares two rates
+    # measured over the same horizon.
+    return add_wacc(
+        d,
+        consecutive_quarters=consecutive_quarters,
+        assumptions=wacc_assumptions,
+    )

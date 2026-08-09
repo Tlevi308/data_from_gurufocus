@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Collection, Sequence
+from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
 
@@ -148,7 +148,8 @@ PRIMARY_OUTPUT_COLUMNS = [
     "calc_roic_minus_wacc_quarterly",
     "calc_creates_value",
     # עמודות הדמה נשארות בסוף: הן מיועדות לצריכה תוכנתית ולא לקריאה.
-    # ב-Excel הן עוברות לגיליון Decomposition נפרד.
+    # ב-Excel הן עוברות לגיליון Decomposition נפרד, ומופרדות גם מה-CSV.
+    # בפלט ה-parquet הן נשארות בטבלה הראשית.
     *DECOMPOSITION_DUMMY_COLUMNS,
 ]
 
@@ -332,45 +333,22 @@ def _format_float_values(worksheet, frame: pd.DataFrame) -> None:
             worksheet.cell(row=row, column=position).number_format = number_format
 
 
-def write_csv(
-    path: Path,
-    data: pd.DataFrame,
-    *,
-    full_precision_columns: Collection[str] = HIGH_PRECISION_OUTPUT_COLUMNS,
-) -> Path:
+def write_csv(path: Path, data: pd.DataFrame) -> Path:
+    """כותב את הטבלה בדיוק כפי שהיא — אותם ערכים שנשמרים בגיליון Data.
+
+    ⚠️ **אין כאן ``float_format``, וזו החלטה ולא השמטה.** עיגול בכתיבה היה
+    משנה את הנתון עצמו ולא רק את תצוגתו: אקסל שומר 313.3299865722656 ומציג
+    313.33, ואילו ``float_format="%.2f"`` היה כותב ל-CSV את 313.33 כערך —
+    הפרש שאין ממנו דרך חזרה. שני הקבצים חייבים להחזיק את אותו מספר.
+
+    בלי עיגול גם נעלם הצורך ברשימת חריגים: קודם נדרשה החרגה מפורשת לתרומות
+    ולשיעורי הריבית, כי תרומה של 0.0031 הייתה נכתבת כ-0.00. עכשיו כל עמודה
+    נכתבת בייצוג הקצר ביותר ששומר על הערך במדויק בקריאה חוזרת.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-
-    # float_format חל על כל הקובץ, ולכן תרומת ROIC של 0.0031 הייתה נכתבת
-    # כ-0.00 ומאבדת את כל המידע. העמודות האלה מומרות למחרוזת בדיוק מלא
-    # לפני הכתיבה, וכל השאר נשאר בשתי ספרות כמו קודם.
-    #
-    # הגישה היא לפי מיקום ולא לפי שם: בתצוגת הביקורת יש כותרות כפולות
-    # במכוון, ושם עמודה כפול היה מחזיר DataFrame במקום Series.
-    wanted = set(full_precision_columns)
-    positions = [
-        position
-        for position, column in enumerate(data.columns)
-        if column in wanted
-    ]
-    if positions:
-        data = data.copy()
-        for position in positions:
-            values = pd.to_numeric(data.iloc[:, position], errors="coerce")
-            data.isetitem(
-                position,
-                values.map(
-                    lambda value: "" if pd.isna(value) else format(value, ".12g")
-                ),
-            )
-
     # utf-8-sig כדי שאקסל בעברית יפתח את הקובץ בקידוד הנכון
-    data.to_csv(
-        path,
-        index=False,
-        encoding="utf-8-sig",
-        float_format="%.2f",
-    )
-    log.info("נשמר: %s", path)
+    data.to_csv(path, index=False, encoding="utf-8-sig")
+    log.info("נשמר: %s (%d שורות, %d עמודות)", path, len(data), data.shape[1])
     return path
 
 

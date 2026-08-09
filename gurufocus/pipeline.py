@@ -291,6 +291,10 @@ def _write_outputs(
     # ה-panel הפנימי נשאר עם שמות עמודות ייחודיים עבור בדיקות וניתוח.
     # רק Excel/CSV מקבלים תצוגת ביקורת עם כפילויות מכוונות.
     audit_panel = calculation_audit_view(panel)
+    # גיליון Data וקובץ ה-CSV הם אותה טבלה בדיוק — אותן עמודות ובאותו סדר.
+    # 63 עמודות הדמה מופרדות משניהם: הן מיועדות לצריכה תוכנתית ולא לקריאה,
+    # ולכן הן יושבות בגיליון Decomposition ובפלט ה-parquet בלבד.
+    data_sheet, dummy_sheet = split_decomposition_dummies(audit_panel)
 
     for fmt in settings.output.formats:
         if fmt == "excel":
@@ -305,9 +309,6 @@ def _write_outputs(
                         [coverage, valuation_coverage],
                         ignore_index=True,
                     ) if coverage is not None else valuation_coverage
-            # גיליון Data נשאר קריא לאדם: 63 עמודות הדמה של הפירוק עוברות
-            # לגיליון Decomposition. ב-CSV וב-parquet הן נשארות במקומן.
-            data_sheet, dummy_sheet = split_decomposition_dummies(audit_panel)
             path = write_excel(
                 build_output_path(settings.output.directory, settings.period, "xlsx"),
                 data_sheet,
@@ -320,7 +321,7 @@ def _write_outputs(
         elif fmt == "csv":
             path = write_csv(
                 build_output_path(settings.output.directory, settings.period, "csv"),
-                audit_panel,
+                data_sheet,
             )
         elif fmt == "parquet":
             path = write_parquet(

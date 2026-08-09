@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 
+import pandas as pd
 from openpyxl import load_workbook
 from pandas.api.types import is_float_dtype
 
@@ -141,22 +142,23 @@ def test_excel_number_formats_match_the_column_kind(
         assert sheet.cell(row=2, column=position).number_format == expected, column
 
 
-def test_contribution_columns_keep_full_precision_in_csv(
-    quarterly_payload,
-    tmp_path,
-):
-    """A ROIC contribution is O(1e-3); "%.2f" would export it as 0.00."""
-    panel = _exported_panel(quarterly_payload)
-    panel = panel.copy()
+def test_every_column_keeps_full_precision_in_csv(quarterly_payload, tmp_path):
+    """Rounding on write would change the number, not just its display.
+
+    A ROIC contribution is O(1e-3), so "%.2f" used to export it as 0.00 and a
+    per-column exemption list existed to rescue it. Without any float_format
+    the exemption is unnecessary and no column loses digits.
+    """
+    panel = _exported_panel(quarterly_payload).copy()
     panel["calc_roic_ebit_contribution"] = 0.00312345
+    panel["market_cap"] = 313.3299865722656
     path = tmp_path / "precision.csv"
     write_csv(path, panel)
     with path.open(encoding="utf-8-sig", newline="") as handle:
         rows = list(csv.reader(handle))
     header, first = rows[0], rows[1]
     assert first[header.index("calc_roic_ebit_contribution")] == "0.00312345"
-    # Everything else keeps the established two-decimal display.
-    assert first[header.index("tax_provision")] == "-20.00"
+    assert first[header.index("market_cap")] == "313.3299865722656"
 
 
 def test_dummy_columns_move_to_their_own_excel_sheet(quarterly_payload, tmp_path):
@@ -174,16 +176,47 @@ def test_dummy_columns_move_to_their_own_excel_sheet(quarterly_payload, tmp_path
     assert workbook["Data"].max_column == data.shape[1]
 
 
-def test_csv_serializes_float_values_with_two_decimals(
-    quarterly_payload,
-    tmp_path,
-):
-    panel = _exported_panel(quarterly_payload)
-    path = tmp_path / "format.csv"
-    write_csv(path, panel)
-    with path.open(encoding="utf-8-sig", newline="") as handle:
-        rows = list(csv.reader(handle))
-    header, first = rows[0], rows[1]
-    assert first[header.index("tax_provision")] == "-20.00"
-    assert first[header.index("calc_raw_tax_rate_quarterly")] == "0.22"
-    assert first[header.index("market_cap")] == "1000.00"
+def test_csv_and_excel_data_sheet_are_the_same_table(quarterly_payload, tmp_path):
+    """הדרישה במלואה: אותן עמודות, אותו סדר ואותם ערכים בשני הקבצים.
+
+    שניהם נכתבים מ-``data_sheet`` — הפאנל ללא עמודות הדמה — ושניהם נקראים
+    בחזרה לאותה טבלה בדיוק. עיגול בכתיבה או עמודה שנוספה רק לאחד מהם ייפול
+    כאן.
+    """
+    data_sheet, dummies = split_decomposition_dummies(
+        _exported_panel(quarterly_payload)
+    )
+    csv_path, excel_path = tmp_path / "panel.csv", tmp_path / "panel.xlsx"
+    write_csv(csv_path, data_sheet)
+    write_excel(excel_path, data_sheet, decomposition=dummies)
+
+    # ⚠️ float_precision="round_trip" חיוני: הפרסר המהיר שהוא ברירת המחדל של
+    # read_csv אינו מעוגל נכון ומחזיר כ-13 ספרות מובהקות בלבד. בלעדיו הבדיקה
+    # הייתה מודדת את הפרסר במקום את הקובץ, וסוטה ב-8e-13 גם כשהקובץ מדויק.
+    from_csv = pd.read_csv(
+        csv_path, encoding="utf-8-sig", float_precision="round_trip"
+    )
+    from_excel = pd.read_excel(excel_path, sheet_name="Data")
+
+    assert from_csv.columns.tolist() == from_excel.columns.tolist()
+    # הסבילות נבחרה ולא הושארה כברירת מחדל, משתי סיבות מנוגדות:
+    #
+    #   ברירת המחדל (rtol=1e-5) רופפת מדי — עיגול לשתי ספרות של
+    #   313.3299865722656 סוטה ב-4e-8 בלבד והיה עובר אותה בשקט, כלומר
+    #   הבדיקה לא הייתה מסוגלת להיכשל על מה שהיא נועדה לתפוס.
+    #
+    #   check_exact=True הדוק מדי — פורמט xlsx שומר 16 ספרות מובהקות ולא 17,
+    #   ולכן 1.8828235607599488 חוזר ממנו כ-1.882823560759949. ה-CSV הוא
+    #   הצד המדויק כאן; ההפרש הוא ULP בודד.
+    pd.testing.assert_frame_equal(
+        from_csv, from_excel, check_dtype=False, rtol=1e-15, atol=0
+    )
+
+
+def test_dummy_columns_are_absent_from_both_data_outputs(quarterly_payload):
+    """עמודות הדמה יושבות בגיליון Decomposition ובפלט parquet בלבד."""
+    data_sheet, dummies = split_decomposition_dummies(
+        _exported_panel(quarterly_payload)
+    )
+    assert not set(DECOMPOSITION_DUMMY_COLUMNS) & set(data_sheet.columns)
+    assert set(DECOMPOSITION_DUMMY_COLUMNS) <= set(dummies.columns)

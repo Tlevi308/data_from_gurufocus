@@ -34,6 +34,7 @@ from typing import Any
 
 import pandas as pd
 
+from .alignment import ALIGNMENT_COLUMNS as _ALIGNMENT_COLUMNS, align_to_quarter
 from .fields import ALL_FIELDS, TEXT_FIELDS
 from .parsing import (
     available_periods,
@@ -49,9 +50,7 @@ from .resolver import Resolution, mark_derived, resolve_fields, unmapped_api_key
 log = logging.getLogger(__name__)
 
 # עמודות היישור שנוספות מעבר למילון השדות
-ALIGNMENT_COLUMNS = [
-    "period_key", "period_year", "period_quarter",
-]
+ALIGNMENT_COLUMNS = list(_ALIGNMENT_COLUMNS)
 
 
 class ExtractionError(RuntimeError):
@@ -93,15 +92,14 @@ class ExtractReport:
 
 
 def _apply_alignment(frame: pd.DataFrame, shift_months: int) -> pd.DataFrame:
-    """מוסיף את עמודות היישור על בסיס fiscal_period_end_date."""
-    end = frame["fiscal_period_end_date"]
+    """מוסיף את עמודות היישור על בסיס fiscal_period_end_date.
 
-    anchor = end - pd.DateOffset(months=shift_months)
-    frame["period_year"] = anchor.dt.year
-    frame["period_quarter"] = "Q" + anchor.dt.quarter.astype(str)
-    frame["period_key"] = (
-        frame["period_year"].astype(str) + frame["period_quarter"]
-    )  # "2026Q1" — מפתח החיבור לפאנל
+    הכלל עצמו יושב ב-:mod:`gurufocus.alignment`, כדי שמחיר המניה יקבל בדיוק
+    את אותו ``period_key`` — ראו את ה-docstring שם.
+    """
+    aligned = align_to_quarter(frame["fiscal_period_end_date"], shift_months)
+    for column in _ALIGNMENT_COLUMNS:
+        frame[column] = aligned[column]  # period_key = "2026Q1", מפתח הפאנל
     return frame
 
 

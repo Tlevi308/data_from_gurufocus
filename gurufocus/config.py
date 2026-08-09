@@ -180,14 +180,12 @@ def _resolve_path(value: str | Path) -> Path:
     return p if p.is_absolute() else PROJECT_ROOT / p
 
 
-def _numeric_block(raw: dict[str, Any], block: str, default: Any) -> Any:
-    """בונה dataclass של פרמטרים מספריים מבלוק ב-config.yaml.
+def _reject_unknown_keys(raw: dict[str, Any], block: str, default: Any) -> None:
+    """עוצר על מפתח שאינו שדה של ה-dataclass.
 
-    מפתח לא מוכר נחסם במפורש: פרמטר שנכתב בשגיאת כתיב היה מתעלם בשקט
-    ומשאיר את ברירת המחדל, כך שהתוצאות היו משתנות בלי שאיש ישים לב.
+    פרמטר שנכתב בשגיאת כתיב היה מתעלם בשקט ומשאיר את ברירת המחדל, כך
+    שהתוצאות היו משתנות בלי שאיש ישים לב.
     """
-    if not raw:
-        return default
     known = {spec.name for spec in dataclass_fields(type(default))}
     unknown = sorted(set(raw) - known)
     if unknown:
@@ -197,6 +195,13 @@ def _numeric_block(raw: dict[str, Any], block: str, default: Any) -> Any:
             + " — המפתחות האפשריים: "
             + ", ".join(sorted(known))
         )
+
+
+def _numeric_block(raw: dict[str, Any], block: str, default: Any) -> Any:
+    """בונה dataclass של פרמטרים מספריים מבלוק ב-config.yaml."""
+    if not raw:
+        return default
+    _reject_unknown_keys(raw, block, default)
     try:
         values = {name: float(value) for name, value in raw.items()}
     except (TypeError, ValueError) as exc:
